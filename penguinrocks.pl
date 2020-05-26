@@ -42,6 +42,7 @@ use XML::Simple;
 use File::Copy;
 use File::Path;
 use Getopt::Long;
+use Data::Dumper;
 
 my $version = "0.9.1";
 my $useragent = 'PenguinRocks/' . $version . ' (' . $OSNAME . ')';
@@ -51,6 +52,7 @@ my $silent_launch = 0;
 my $patchonly = 0;
 my $launchonly = 0;
 my $verify = 0;
+my $generate_batch;
 my $manifest_file;
 my $profile;
 
@@ -157,7 +159,8 @@ sub ParseOptions
 		'verify' => \$verify,
 		'help' => \$help,
 		'manifest=s' => \$manifest_file,
-		'profile=i' => \$profile
+		'profile=i' => \$profile,
+		'generate-batch=s' => \$generate_batch
 	);
 
 	$silent_launch = 1 if($silent);
@@ -212,6 +215,7 @@ sub GetFile
 {
 	my $urls = shift;
 	my $target = shift;
+	my $md5sig = shift;
 	my $result;
 
 	my $base_index = int(rand(scalar(@{$urls})));
@@ -248,6 +252,17 @@ sub GetFile
 				$result = system("$get_program $target $url");
 			}
 		}
+
+		if ($result == 0 && defined($md5sig)) {
+			print "Verifying...\n";
+			if (!VerifyMD5($target, $md5sig)) {
+				print "Verification failed.\n";
+				unlink($target);
+				$result = 1;
+			}
+		};
+
+		last if ($result == 0);
 	}
 	die "Unable to fetch file ${url}\n" if($result != 0);
 }
@@ -319,7 +334,7 @@ sub RepairCoh
 		}
 		elsif((! -e $file->{name}) or (!VerifyMD5($file->{name}, $file->{md5})))
 		{
-			GetFile($file->{url}, '.patches/tempfile.bin');
+			GetFile($file->{url}, '.patches/tempfile.bin', $file->{md5});
 			VerifyMD5('.patches/tempfile.bin', $file->{md5}) || die "Downloaded file $file->{name} does not have correct MD5 checksum.\n";
 			unlink($file->{name}) if(-e $file->{name});
 			my ($target_dir) = $file->{name} =~ /^(.*\/)/;
@@ -370,8 +385,20 @@ sub LaunchCoh
 	{
 		$command = "wine ${exe} ${params} " . join(" ", @args);
 	}
-	$command .= " >/dev/null 2>&1" if($silent_launch);
-	exec($command);
+	$command .= " >/dev/null 2>&1" if($silent_launch && !defined($generate_batch));
+	if (defined($generate_batch)) {
+		my $gb_h;
+		if (!open($gb_h, ">", $generate_batch)) {
+			die("Unable to generate batch file: $!");
+		}
+		$command =~ s/^wine //;
+		$command =~ s/^\s+//;
+		$command =~ s/\s+$//;
+		print $gb_h $command;
+		close($gb_h);
+	} else {
+		exec($command);
+	}
 }
 
 @args = ParseOptions();
